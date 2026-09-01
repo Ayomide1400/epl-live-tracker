@@ -1,121 +1,117 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+const POLL_INTERVAL_MS = 60_000
+
+const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED', 'LIVE'])
+
+function statusLabel(status) {
+  if (LIVE_STATUSES.has(status)) return 'LIVE'
+  if (status === 'FINISHED') return 'FT'
+  if (status === 'SCHEDULED' || status === 'TIMED') return 'UPCOMING'
+  return status
+}
+
+function statusClass(status) {
+  if (LIVE_STATUSES.has(status)) return 'status live'
+  if (status === 'FINISHED') return 'status finished'
+  return 'status upcoming'
+}
+
+function kickoffCountdown(utcDate) {
+  const diffMs = new Date(utcDate).getTime() - Date.now()
+  if (diffMs <= 0) return null
+  const hours = Math.floor(diffMs / 3_600_000)
+  const minutes = Math.floor((diffMs % 3_600_000) / 60_000)
+  if (hours > 24) {
+    const days = Math.floor(hours / 24)
+    return `in ${days}d`
+  }
+  return `in ${hours}h ${minutes}m`
+}
+
+function MatchCard({ match }) {
+  const { homeTeam, awayTeam, score, status, utcDate } = match
+  const countdown =
+    status === 'SCHEDULED' || status === 'TIMED'
+      ? kickoffCountdown(utcDate)
+      : null
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <li className="match-card">
+      <span className={statusClass(status)}>{statusLabel(status)}</span>
+      <div className="teams">
+        <span className="team">{homeTeam.name}</span>
+        <span className="score">
+          {score.fullTime.home ?? '-'} : {score.fullTime.away ?? '-'}
+        </span>
+        <span className="team">{awayTeam.name}</span>
+      </div>
+      {countdown && <span className="countdown">{countdown}</span>}
+    </li>
+  )
+}
 
-      <div className="ticks"></div>
+function App() {
+  const [matches, setMatches] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [stale, setStale] = useState(false)
+  const hasDataRef = useRef(false)
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  useEffect(() => {
+    let cancelled = false
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    async function loadFixtures() {
+      try {
+        const res = await fetch('/api/fixtures')
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`)
+        const data = await res.json()
+        if (cancelled) return
+        setMatches(data.matches ?? [])
+        setError(null)
+        setStale(false)
+        hasDataRef.current = true
+      } catch (err) {
+        if (cancelled) return
+        setError(err.message)
+        setStale(hasDataRef.current)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadFixtures()
+    const id = setInterval(loadFixtures, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
+
+  return (
+    <main className="tracker">
+      <h1>EPL Live Tracker</h1>
+
+      {stale && (
+        <p className="banner stale">
+          Couldn't refresh — showing the last data we have.
+        </p>
+      )}
+      {error && !hasDataRef.current && (
+        <p className="banner error">Couldn't load fixtures: {error}</p>
+      )}
+
+      {loading && matches.length === 0 ? (
+        <p className="banner">Loading fixtures…</p>
+      ) : (
+        <ul className="match-list">
+          {matches.map((match) => (
+            <MatchCard key={match.id} match={match} />
+          ))}
+        </ul>
+      )}
+    </main>
   )
 }
 
