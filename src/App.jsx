@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
-const POLL_INTERVAL_MS = 60_000
+const POLL_INTERVAL_MS = 5_000
 
 const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED', 'LIVE'])
 
@@ -81,11 +81,17 @@ function App() {
       }
     }
 
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') loadFixtures()
+    }
+
     loadFixtures()
     const id = setInterval(loadFixtures, POLL_INTERVAL_MS)
+    document.addEventListener('visibilitychange', handleVisibility)
     return () => {
       cancelled = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [])
 
